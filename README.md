@@ -16,7 +16,7 @@ This repo is the **single source of truth** for the database. Application code
 
 ```
 migrations/   versioned SQL migrations (dbmate format: -- migrate:up / -- migrate:down)
-docs/         ERD and naming/constraint conventions
+docs/         ERD, DBML schema, required fields, naming/constraint conventions
 ```
 
 ## Migrations
@@ -36,4 +36,5 @@ See `livestock-infra` for the Docker Postgres stack, then run the migrations in 
 
 ## Ownership
 
-Managed by the data engineering role. See `docs/conventions.md` before adding tables.
+Managed by the data engineering role. Before adding tables or writing forms, read
+`docs/conventions.md`, `docs/REQUIRED_FIELDS.md` and `docs/schema.dbml`.

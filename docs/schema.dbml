@@ -1,0 +1,671 @@
+// Livestock Management System — DBML ERD
+// Source of truth: migrations/. Regenerate/verify with dbdiagram.io.
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+enum animal_origin {
+  purchased
+  local
+  newborn
+  born_on_farm
+  gifted
+  transferred_in
+}
+enum animal_sex { male female unknown }
+enum animal_status {
+  active
+  sold
+  dead
+  archived
+  deceased
+  transferred
+  quarantined
+}
+enum group_type { herd pen paddock category }
+enum history_event_type { health weight location ownership status_change group_change }
+enum health_event_type {
+  vaccination
+  treatment
+  checkup
+  illness
+  injury
+  deworming
+  vet_visit
+  surgery
+}
+enum health_record_status { scheduled completed cancelled }
+enum breeding_event_type { mating insemination pregnancy_check birth abortion }
+enum breeding_method { natural artificial_insemination embryo_transfer }
+enum breeding_status { planned confirmed_pregnant not_pregnant completed aborted }
+enum offspring_outcome { live stillborn died_before_weaning weaned }
+enum stock_movement_type { in out adjustment }
+enum stock_transaction_type { purchase consumption adjustment waste transfer }
+enum purchase_order_status { pending ordered partially_received received cancelled }
+enum txn_type { income expense }
+enum financial_category {
+  animal_sale
+  produce_sale
+  byproduct_sale
+  feed_purchase
+  vet_expense
+  labor_expense
+  equipment_expense
+  utilities
+  loan_repayment
+  other
+}
+enum invoice_status { draft sent partial paid overdue cancelled }
+enum installment_status { pending paid overdue }
+enum worker_role { owner manager worker vet }
+enum task_status { pending in_progress completed cancelled }
+enum priority { low medium high critical }
+enum attendance_status { present absent late excused }
+enum notification_type { health breeding inventory financial workforce system }
+enum notification_channel { sms email web_push whatsapp in_app }
+enum notification_status { pending sent failed read dismissed }
+
+// ---------------------------------------------------------------------------
+// Tenancy, users and access
+// ---------------------------------------------------------------------------
+Table tenants {
+  id uuid [pk]
+  name text
+  subscription_plan text
+  subscription_status text
+  created_at timestamptz
+  updated_at timestamptz
+}
+
+Table users {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  email citext
+  password_hash text
+  full_name text
+  phone text
+  is_active boolean
+  last_login_at timestamptz
+  created_at timestamptz
+  updated_at timestamptz
+  indexes { (tenant_id, email) [unique] }
+}
+
+Table roles {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id, null] // NULL = system role
+  name text
+  description text
+  created_at timestamptz
+}
+
+Table permissions {
+  id uuid [pk]
+  code text [unique]
+  description text
+}
+
+Table user_roles {
+  user_id uuid [ref: > users.id]
+  role_id uuid [ref: > roles.id]
+  indexes { (user_id, role_id) [pk] }
+}
+
+Table role_permissions {
+  role_id uuid [ref: > roles.id]
+  permission_id uuid [ref: > permissions.id]
+  indexes { (role_id, permission_id) [pk] }
+}
+
+Table breeds {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id, null] // NULL = system breed
+  name text
+  species text
+  created_at timestamptz
+}
+
+// ---------------------------------------------------------------------------
+// Animals, groups and per-animal history
+// ---------------------------------------------------------------------------
+Table animals {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  tag_number text
+  rfid_code text
+  name text
+  species text
+  breed_id uuid [ref: > breeds.id]
+  breed_name_raw text
+  sex animal_sex
+  date_of_birth date
+  date_of_birth_is_estimated boolean
+  origin animal_origin
+  origin_source text
+  dam_id uuid [ref: > animals.id]
+  sire_id uuid [ref: > animals.id]
+  current_group_id uuid [ref: > groups.id]
+  status animal_status
+  acquisition_date date
+  acquisition_cost numeric(14,2)
+  sale_date date
+  sale_price numeric(14,2)
+  current_owner text
+  photo_url text
+  notes text
+  purchase_price numeric(14,2)
+  purchase_date date
+  created_by uuid [ref: > users.id]
+  is_legacy boolean
+  created_at timestamptz
+  updated_at timestamptz
+  indexes {
+    (tenant_id, tag_number) [unique]
+    (tenant_id, rfid_code) [unique]
+    (tenant_id, id) [unique]
+  }
+}
+
+Table groups {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  name text
+  type group_type
+  parent_group_id uuid [ref: > groups.id]
+  capacity integer
+  location text
+  description text
+  created_at timestamptz
+  updated_at timestamptz
+  indexes { (tenant_id, name) [unique] }
+}
+
+Table animal_group_history {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  animal_id uuid [ref: > animals.id]
+  group_id uuid [ref: > groups.id]
+  start_date date
+  end_date date // NULL = currently in this group
+  reason text
+  recorded_by uuid [ref: > users.id]
+  created_at timestamptz
+}
+
+Table animal_history_log {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  animal_id uuid [ref: > animals.id]
+  event_type history_event_type
+  event_date timestamptz
+  weight_kg numeric(8,2)
+  location_from text
+  location_to text
+  previous_owner text
+  new_owner text
+  previous_value text
+  new_value text
+  recorded_by uuid [ref: > users.id]
+  notes text
+  created_at timestamptz
+}
+
+// ---------------------------------------------------------------------------
+// Health and mortality
+// ---------------------------------------------------------------------------
+Table health_records {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  animal_id uuid [ref: > animals.id]
+  event_type health_event_type
+  occurred_at timestamptz
+  diagnosis text
+  treatment text
+  medication text
+  dosage text
+  vet_name text
+  cost numeric(14,2)
+  currency char(3)
+  record_status health_record_status
+  next_due_date date
+  withdrawal_end_date date
+  medication_id uuid [ref: > medications.id]
+  vet_id uuid [ref: > workers.id]
+  notes text
+  corrects_id uuid [ref: > health_records.id]
+  recorded_by uuid [ref: > users.id]
+  is_legacy boolean
+  created_at timestamptz
+}
+
+Table medications {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  name text
+  type text
+  manufacturer text
+  unit text
+  cost_per_unit numeric(14,2)
+  withdrawal_period_meat_days integer
+  withdrawal_period_milk_days integer
+  current_stock numeric(14,2)
+  notes text
+  created_at timestamptz
+  updated_at timestamptz
+  indexes { (tenant_id, name) [unique] }
+}
+
+Table mortality_log {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  animal_id uuid [ref: > animals.id]
+  date_of_death date
+  cause_of_death text
+  diagnosed_by uuid [ref: > workers.id]
+  necropsy_performed boolean
+  disposal_method text
+  notes text
+  created_at timestamptz
+  indexes { (tenant_id, animal_id) [unique] }
+}
+
+// ---------------------------------------------------------------------------
+// Breeding
+// ---------------------------------------------------------------------------
+Table breeding_events {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  dam_id uuid [ref: > animals.id]
+  sire_id uuid [ref: > animals.id]
+  event_type breeding_event_type
+  breeding_method breeding_method
+  breeding_status breeding_status
+  occurred_at timestamptz
+  expected_due_date date
+  actual_birth_date date
+  offspring_count integer
+  notes text
+  is_legacy boolean
+  recorded_by uuid [ref: > users.id]
+  created_at timestamptz
+}
+
+Table birth_records {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  breeding_event_id uuid [ref: > breeding_events.id]
+  dam_id uuid [ref: > animals.id]
+  birth_date date
+  total_offspring integer
+  live_births integer
+  stillbirths integer
+  notes text
+  created_at timestamptz
+  indexes { (tenant_id, breeding_event_id) [unique] }
+}
+
+Table offspring {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  birth_record_id uuid [ref: > birth_records.id]
+  animal_id uuid [ref: > animals.id]
+  outcome offspring_outcome
+  birth_weight_kg numeric(8,2)
+  weaning_date date
+  weaning_weight_kg numeric(8,2)
+  notes text
+  created_at timestamptz
+}
+
+// ---------------------------------------------------------------------------
+// Feed (legacy, retained) and general inventory/supply
+// ---------------------------------------------------------------------------
+Table feed_items {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  name text
+  category text
+  unit text
+  created_at timestamptz
+  indexes { (tenant_id, name) [unique] }
+}
+
+Table feed_inventory {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  feed_item_id uuid [ref: > feed_items.id]
+  quantity_on_hand numeric(14,3)
+  reorder_level numeric(14,3)
+  unit_cost numeric(14,2)
+  last_restocked_at timestamptz
+  updated_at timestamptz
+  indexes { (tenant_id, feed_item_id) [unique] }
+}
+
+Table stock_movements {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  feed_item_id uuid [ref: > feed_items.id]
+  movement_type stock_movement_type
+  quantity numeric(14,3)
+  reason text
+  occurred_at timestamptz
+  recorded_by uuid [ref: > users.id]
+  created_at timestamptz
+}
+
+Table stock_alerts {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  feed_item_id uuid [ref: > feed_items.id]
+  message text
+  is_resolved boolean
+  created_at timestamptz
+  resolved_at timestamptz
+}
+
+Table reorder_suggestions {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  feed_item_id uuid [ref: > feed_items.id]
+  suggested_quantity numeric(14,3)
+  reason text
+  status text
+  created_at timestamptz
+}
+
+Table suppliers {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  name text
+  contact_person text
+  phone text
+  email citext
+  address text
+  notes text
+  created_at timestamptz
+  updated_at timestamptz
+  indexes { (tenant_id, name) [unique] }
+}
+
+Table inventory_categories {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id, null] // NULL = system category
+  name text
+  description text
+  created_at timestamptz
+}
+
+Table inventory_items {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  category_id uuid [ref: > inventory_categories.id]
+  name text
+  sku text
+  unit text
+  current_stock numeric(14,2)
+  reorder_level numeric(14,2)
+  reorder_quantity numeric(14,2)
+  unit_cost numeric(14,2)
+  preferred_supplier_id uuid [ref: > suppliers.id]
+  storage_location text
+  expiry_date date
+  created_at timestamptz
+  updated_at timestamptz
+  indexes { (tenant_id, name) [unique] }
+}
+
+Table purchase_orders {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  supplier_id uuid [ref: > suppliers.id]
+  order_date date
+  expected_delivery_date date
+  received_date date
+  status purchase_order_status
+  total_cost numeric(14,2)
+  created_by uuid [ref: > users.id]
+  notes text
+  created_at timestamptz
+  updated_at timestamptz
+}
+
+Table purchase_order_items {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  purchase_order_id uuid [ref: > purchase_orders.id]
+  inventory_item_id uuid [ref: > inventory_items.id]
+  quantity numeric(14,2)
+  unit_cost numeric(14,2)
+  subtotal numeric(14,2)
+}
+
+Table stock_transactions {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  inventory_item_id uuid [ref: > inventory_items.id]
+  transaction_type stock_transaction_type
+  quantity numeric(14,2)
+  transaction_date timestamptz
+  related_animal_id uuid [ref: > animals.id]
+  related_group_id uuid [ref: > groups.id]
+  performed_by uuid [ref: > users.id]
+  notes text
+  source_system text
+  source_id text
+  created_at timestamptz
+}
+
+// ---------------------------------------------------------------------------
+// Finance
+// ---------------------------------------------------------------------------
+Table transactions {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  txn_type txn_type
+  amount numeric(14,2)
+  currency char(3)
+  category text
+  category_code financial_category
+  description text
+  reference text
+  occurred_at timestamptz
+  related_animal_id uuid [ref: > animals.id]
+  related_group_id uuid [ref: > groups.id]
+  related_invoice_id uuid [ref: > invoices.id]
+  related_purchase_order_id uuid [ref: > purchase_orders.id]
+  payment_method text
+  recorded_by uuid [ref: > users.id]
+  is_legacy boolean
+  created_at timestamptz
+}
+
+Table invoices {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  invoice_number text
+  customer_name text
+  customer_contact text
+  issue_date date
+  due_date date
+  total_amount numeric(14,2)
+  currency char(3)
+  status invoice_status
+  notes text
+  created_by uuid [ref: > users.id]
+  is_legacy boolean
+  created_at timestamptz
+  updated_at timestamptz
+  indexes { (tenant_id, invoice_number) [unique] }
+}
+
+Table invoice_items {
+  id uuid [pk]
+  invoice_id uuid [ref: > invoices.id]
+  description text
+  quantity numeric(14,3)
+  unit_price numeric(14,2)
+}
+
+Table installments {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  invoice_id uuid [ref: > invoices.id]
+  amount numeric(14,2)
+  due_date date
+  paid_date date
+  status installment_status
+  method text
+  reference text
+  created_at timestamptz
+}
+
+Table payments {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  invoice_id uuid [ref: > invoices.id]
+  payment_date date
+  amount numeric(14,2)
+  payment_method text
+  reference_number text
+  recorded_by uuid [ref: > users.id]
+  notes text
+  created_at timestamptz
+}
+
+Table budgets {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  name text
+  category text
+  category_code financial_category
+  period_start date
+  period_end date
+  planned_amount numeric(14,2)
+  notes text
+  created_at timestamptz
+}
+
+// ---------------------------------------------------------------------------
+// Workforce
+// ---------------------------------------------------------------------------
+Table workers {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  user_id uuid [ref: > users.id]
+  full_name text
+  phone text
+  email citext
+  role worker_role
+  role_title text
+  hired_date date
+  salary numeric(14,2)
+  notes text
+  is_active boolean
+  is_legacy boolean
+  created_at timestamptz
+  updated_at timestamptz
+}
+
+Table attendance {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  worker_id uuid [ref: > workers.id]
+  work_date date
+  status attendance_status
+  check_in timestamptz
+  check_out timestamptz
+  recorded_by uuid [ref: > users.id]
+  acknowledged_by uuid [ref: > users.id]
+  acknowledged_at timestamptz
+  notes text
+  created_at timestamptz
+  indexes { (tenant_id, worker_id, work_date) [unique] }
+}
+
+Table work_schedules {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  worker_id uuid [ref: > workers.id]
+  shift_date date
+  start_time time
+  end_time time
+  role_for_shift text
+  notes text
+  created_at timestamptz
+}
+
+Table task_assignments {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  worker_id uuid [ref: > workers.id]
+  task_title text
+  description text
+  related_animal_id uuid [ref: > animals.id]
+  related_group_id uuid [ref: > groups.id]
+  assigned_by uuid [ref: > users.id]
+  due_date date
+  status task_status
+  priority priority
+  completed_at timestamptz
+  created_at timestamptz
+  updated_at timestamptz
+}
+
+// ---------------------------------------------------------------------------
+// Audit, notifications and alerts
+// ---------------------------------------------------------------------------
+Table audit_log {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  actor_user_id uuid [ref: > users.id]
+  action text
+  entity_type text
+  entity_id text
+  old_values jsonb
+  new_values jsonb
+  ip_address inet
+  user_agent text
+  occurred_at timestamptz
+}
+
+Table notifications {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  recipient_user_id uuid [ref: > users.id]
+  channel notification_channel
+  type notification_type
+  title text
+  subject text
+  body text
+  priority priority
+  status notification_status
+  related_entity_type text
+  related_entity_id text
+  scheduled_at timestamptz
+  sent_at timestamptz
+  read_at timestamptz
+  dismissed_at timestamptz
+  error_message text
+  attempts integer
+  created_at timestamptz
+  updated_at timestamptz
+}
+
+Table alert_rules {
+  id uuid [pk]
+  tenant_id uuid [ref: > tenants.id]
+  name text
+  event_type text
+  channel notification_channel
+  lead_time_days integer
+  is_active boolean
+  recipient_role worker_role
+  recipient_user_id uuid [ref: > users.id]
+  title_template text
+  body_template text
+  severity priority
+  last_run_at timestamptz
+  created_at timestamptz
+  updated_at timestamptz
+}
